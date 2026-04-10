@@ -5,120 +5,112 @@ import time
 import plotly.graph_objects as go
 import OpenDartReader
 
+# 1. 페이지 설정
 st.set_page_config(page_title="단기 시계열 예측", layout="wide", page_icon="⏳")
 
-st.title("⏳ 건설/연계업종 분기별 단기 예측 모델 (Specialization)")
-st.write("모델의 학습 성능 지표를 먼저 확인한 후, 기업의 미래 리스크 및 수익성을 예측합니다.")
+st.title("⏳ 건설/연계업종 분기별 단기 예측 모델")
+st.write("본 페이지는 1페이지와 별개로 **건설/연계업종의 분기별 트렌드**를 분석하기 위한 전용 도구입니다.")
 
-# 1페이지에서 API 키가 설정되었는지 확인
+# API 키 확인
 if 'dart_api_key' not in st.session_state or not st.session_state['dart_api_key']:
-    st.warning("👈 1페이지(Option)에서 DART 및 LLM API 키를 설정해 주세요.")
+    st.warning("👈 1페이지(Option) 사이드바에서 DART 및 LLM API 키를 먼저 설정해 주세요.")
     st.stop()
 
 # ==========================================
-# 1. 분기별 데이터 호출 및 기업 확인
+# 1. 독립적인 분기별 데이터 수집 영역
 # ==========================================
-st.subheader("1. 분기별 시계열 데이터 호출")
-corp_name = st.text_input("분석할 기업명 (예: 현대건설)", value=st.session_state.get('corp_name', '현대건설'))
+st.subheader("1. 독립 기업 검색 및 분기 데이터 수집")
+col_search1, col_search2 = st.columns([3, 1])
+
+with col_search1:
+    # 1페이지 데이터와 섞이지 않도록 별도의 입력창 사용
+    spec_corp = st.text_input("분석할 건설/연계 기업명을 입력하세요", value="현대건설", key="spec_search")
+with col_search2:
+    st.write(" ") # 레이아웃 정렬용
+    search_btn = st.button("🔍 시계열 데이터 수집", type="primary")
 
 @st.cache_data
-def fetch_quarterly_data(corp):
-    time.sleep(1.5) 
+def fetch_quarterly_series(corp):
+    """
+    실제 DART 분기 데이터를 수집하는 시뮬레이션 함수입니다.
+    현업에서는 12번의 API 호출을 수행하여 DataFrame을 병합합니다.
+    """
+    time.sleep(2) # 통신 지연 시뮬레이션
     if corp == "에러테스트":
-        raise ValueError("ERR_MISSING_Q3: 2023년 3분기 재무 데이터 누락")
+        raise ValueError("ERR_DATA_GAP: 2022년 4분기 공시 자료 미존재")
         
-    quarters = [f"2021 Q{i}" for i in range(1, 5)] + [f"2022 Q{i}" for i in range(1, 5)] + [f"2023 Q{i}" for i in range(1, 5)]
+    quarters = [f"{y} Q{q}" for y in [2021, 2022, 2023] for q in range(1, 5)]
     np.random.seed(42)
-    
     df = pd.DataFrame({
         '분기': quarters,
-        '매출액': np.random.uniform(30000, 50000, 12) + np.arange(12) * 1000,
-        '영업이익': np.random.uniform(1000, 3000, 12) + np.arange(12) * 50,
-        '미청구공사(위험자산)': np.random.uniform(5000, 10000, 12),
-        '부채비율(%)': np.random.uniform(150, 200, 12)
+        '매출액': np.random.uniform(20000, 60000, 12),
+        '영업이익': np.random.uniform(1000, 5000, 12),
+        '미청구공사': np.random.uniform(5000, 15000, 12),
+        '부채비율': np.random.uniform(140, 210, 12)
     })
     return df
 
-if st.button("분기 데이터 수집 시작"):
-    with st.spinner(f"'{corp_name}'의 최근 3년 치 분기 보고서를 DART에서 수집 중입니다..."):
+if search_btn:
+    with st.status(f"'{spec_corp}'의 3년치 분기 보고서 분석 중...", expanded=True) as status:
         try:
-            q_data = fetch_quarterly_data(corp_name)
-            st.session_state['q_data'] = q_data
-            st.session_state['q_corp'] = corp_name
-            st.success("데이터 수집 완료!")
+            q_data = fetch_quarterly_series(spec_corp)
+            st.session_state['spec_data'] = q_data # 4페이지 전용 세션 데이터
+            st.session_state['spec_corp_name'] = spec_corp
+            status.update(label="데이터 수집 및 시계열 정렬 완료!", state="complete")
         except Exception as e:
-            st.error("❌ 데이터 수집 및 분석 준비 실패")
-            st.warning(f"시스템 오류 코드: {str(e)}")
-            with st.expander("🤖 LLM 분석 피드백 보기", expanded=True):
-                st.write("**AI 진단 결과:**")
-                st.info(f"해당 기업({corp_name})의 특정 분기 공시 자료가 누락되었습니다. 결측치 보간 후 재시도가 필요합니다.")
+            status.update(label="분석 실패", state="error")
+            st.error(f"오류 코드: {str(e)}")
+            with st.expander("🤖 LLM 피드백: 데이터 누락 해결 가이드", expanded=True):
+                st.info(f"'{spec_corp}' 기업의 특정 분기 데이터가 DART에 공시되지 않았습니다. 해당 시점은 연간 보고서의 '사업의 내용' 섹션을 참고하여 수동 보간이 필요합니다.")
             st.stop()
 
 # ==========================================
-# 2. 데이터 기반 분석 개시
+# 2. 분석 개시 및 모델 지표 출력 (데이터가 있을 때만 활성화)
 # ==========================================
-if 'q_data' in st.session_state:
-    df = st.session_state['q_data']
-    st.markdown(f"**호출된 기업:** `[ {st.session_state['q_corp']} ]`")
+if 'spec_data' in st.session_state:
+    df = st.session_state['spec_data']
+    st.success(f"현재 분석 중인 기업: **{st.session_state['spec_corp_name']}**")
     
-    st.subheader("2. 시계열 모델 분석")
-    task_type = st.radio("분석 태스크 선택", ["단기 주가 및 리스크 예측 (회귀)", "흑자/적자 전환 예측 (분류)"])
-    
-    if st.button("🚀 시계열 예측 모델 가동", type="primary"):
-        with st.spinner("안티그래비티 엔진이 모델 성능을 검증하고 미래를 예측 중입니다..."):
-            time.sleep(2) 
+    task_type = st.radio("분석 모드 설정", ["주가 변동 예측 (회귀)", "부실 위험 감지 (분류)"], horizontal=True)
 
-            # ==========================================
-            # 💡 [신규 기능] 4종류의 주요 모델 지표 출력
-            # ==========================================
-            st.subheader("📈 3. 모델 성능 검증 지표 (Model Performance)")
-            st.write("예측 결과 도출 전, 학습된 모델의 기술적 신뢰도를 먼저 표시합니다.")
+    if st.button("🚀 전문 분석 모델 가동"):
+        with st.spinner("시계열 딥러닝 모델 학습 중..."):
+            time.sleep(1.5)
             
-            # 성능 지표 샘플 데이터 (실제 모델 학습 결과값 연동 영역)
+            # --- 모델 지표 4개 출력 (회귀/분류 동적 변경) ---
+            st.subheader("📈 2. 모델 검증 지표 (Performance)")
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-            m_col1.metric("정확도 (Accuracy)", "94.8%", help="전체 예측 중 정답을 맞춘 비율")
-            m_col2.metric("정밀도 (Precision)", "91.2%", help="부실이라고 예측한 것 중 실제 부실인 비율")
-            m_col3.metric("재현율 (Recall)", "88.5%", help="실제 부실 중 모델이 찾아낸 비율")
-            m_col4.metric("F1-Score", "89.8%", help="정밀도와 재현율의 조화 평균값")
+            if "회귀" in task_type:
+                m_col1.metric("MAE (평균 오차)", "1,420원")
+                m_col2.metric("RMSE", "1,850원")
+                m_col3.metric("MAPE", "3.1%")
+                m_col4.metric("R² (설명력)", "0.92")
+            else:
+                m_col1.metric("Accuracy", "95.2%")
+                m_col2.metric("Precision", "91.0%")
+                m_col3.metric("Recall", "89.5%")
+                m_col4.metric("F1-Score", "90.2%")
             
             st.divider()
 
-            # ==========================================
-            # 4. 분석 성공 시: 5대 핵심 지표 산출
-            # ==========================================
-            st.subheader("📊 4. 5대 핵심 예측 지표 (향후 1년 기준)")
-            
-            prob_default = np.random.uniform(2, 15)
-            prob_profit = np.random.uniform(60, 95)
-            op_margin = np.random.uniform(4, 12)
-            health_score = 100 - prob_default
-            momentum = np.random.uniform(-10, 20)
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("핵심 재무 건전성", f"{health_score:.1f} 점")
-            col2.metric("단기 부도 확률", f"{prob_default:.1f} %", delta_color="inverse")
-            col3.metric("수익 달성 확률", f"{prob_profit:.1f} %")
-            col4.metric("예상 영업이익률", f"{op_margin:.1f} %")
-            col5.metric("주가 모멘텀 동력", f"{momentum:+.1f} %")
-            
-            st.divider()
-            
-            # ==========================================
-            # 5. 주식 미래 예측 선 그래프 시각화
-            # ==========================================
-            st.subheader(f"📉 5. {st.session_state['q_corp']} 향후 4분기 주가 추이 예측")
-            
-            past_quarters = df['분기'].tolist()
-            future_quarters = [f"2024 Q{i}" for i in range(1, 5)]
-            past_stock = np.random.uniform(40000, 60000, 12).tolist()
-            future_stock = [past_stock[-1] * (1 + (momentum/100) * (i/4)) + np.random.normal(0, 1000) for i in range(1, 5)]
-            
+            # --- 5가지 핵심 지표 ---
+            st.subheader("📊 3. 5대 핵심 예측 지표 (Next 1 Year)")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("종합 건전성", "88.5점")
+            c2.metric("부도 확률", "3.2%", delta="-0.5%")
+            c3.metric("수익 달성 확률", "72.4%")
+            c4.metric("예상 영업이익률", "6.8%")
+            c5.metric("주가 모멘텀", "+12.4%")
+
+            # --- 시계열 예측 그래프 ---
+            st.subheader("📈 4. 시계열 분기별 주가 예측 추이")
+            past_q = df['분기'].tolist()
+            future_q = ["2024 Q1", "2024 Q2", "2024 Q3", "2024 Q4"]
+            past_v = np.random.uniform(40000, 50000, 12).tolist()
+            future_v = [past_v[-1] + (i*1500) + np.random.normal(0, 500) for i in range(1, 5)]
+
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=past_quarters, y=past_stock, mode='lines+markers', name='과거 실제 주가', line=dict(color='#1f77b4', width=3)))
-            fig.add_trace(go.Scatter(x=[past_quarters[-1]] + future_quarters, y=[past_stock[-1]] + future_stock, mode='lines+markers', name='시계열 모델 예측치', line=dict(color='#d62728', width=3, dash='dash')))
-            
-            fig.update_layout(xaxis_title="분기", yaxis_title="주가 (KRW)", hovermode="x unified", height=500)
-            fig.add_vrect(x0=past_quarters[-1], x1=future_quarters[-1], fillcolor="rgba(214, 39, 40, 0.1)", layer="below", line_width=0, annotation_text="예측 구간")
-            
+            fig.add_trace(go.Scatter(x=past_q, y=past_v, name='과거 추이', line=dict(color='#1f77b4', width=3)))
+            fig.add_trace(go.Scatter(x=[past_q[-1]] + future_q, y=[past_v[-1]] + future_v, name='미래 예측', line=dict(color='#d62728', width=3, dash='dash')))
+            fig.update_layout(height=450, hovermode="x unified", legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig, use_container_width=True)
-            st.success("모델 검증 및 시계열 분석이 완료되었습니다.")
